@@ -201,6 +201,7 @@ pub struct EncodableCrate {
     pub recent_downloads: Option<i64>,
     // NOTE: Used by shields.io, altering `max_version` requires a PR with shields.io
     pub max_version: String,
+    pub all_versions_yanked: bool,
     pub newest_version: String, // Most recently updated version, which may not be max
     pub max_stable_version: Option<String>,
     pub description: Option<String>,
@@ -222,6 +223,7 @@ impl EncodableCrate {
         badges: Option<Vec<Badge>>,
         exact_match: bool,
         recent_downloads: Option<i64>,
+        all_versions_yanked: bool
     ) -> Self {
         let Crate {
             name,
@@ -239,7 +241,8 @@ impl EncodableCrate {
             None => Some(format!("/api/v1/crates/{}/versions", name)),
         };
         let keyword_ids = keywords.map(|kws| kws.iter().map(|kw| kw.keyword.clone()).collect());
-        let category_ids = categories.map(|cats| cats.iter().map(|cat| cat.slug.clone()).collect());
+        let category_ids =
+            categories.map(|cats| cats.iter().map(|cat| cat.slug.clone()).collect());
         let badges = badges.map(|bs| bs.into_iter().map(Badge::into).collect());
         let documentation = Self::remove_blocked_documentation_urls(documentation);
 
@@ -257,7 +260,7 @@ impl EncodableCrate {
 
         let max_stable_version = top_versions.highest_stable.as_ref().map(|v| v.to_string());
 
-        EncodableCrate {
+        let mut encodable_crate = EncodableCrate {
             id: name.clone(),
             name: name.clone(),
             updated_at,
@@ -267,6 +270,7 @@ impl EncodableCrate {
             versions,
             keywords: keyword_ids,
             categories: category_ids,
+            all_versions_yanked,
             badges,
             max_version,
             newest_version,
@@ -284,7 +288,20 @@ impl EncodableCrate {
                 owner_user: Some(format!("/api/v1/crates/{}/owner_user", name)),
                 reverse_dependencies: format!("/api/v1/crates/{}/reverse_dependencies", name),
             },
+        };
+        if encodable_crate.all_versions_yanked {
+            encodable_crate.enforce_yanked_crate();
         }
+        encodable_crate
+    }
+
+    pub fn enforce_yanked_crate(&mut self) {
+        self.badges = None;
+        self.description = None;
+        self.homepage = None;
+        self.documentation = None;
+        self.repository = None;
+        self.max_version = "0.0.0".to_string();
     }
 
     pub fn from_minimal(
@@ -293,6 +310,7 @@ impl EncodableCrate {
         badges: Option<Vec<Badge>>,
         exact_match: bool,
         recent_downloads: Option<i64>,
+        all_versions_yanked: bool,
     ) -> Self {
         Self::from(
             krate,
@@ -303,6 +321,7 @@ impl EncodableCrate {
             badges,
             exact_match,
             recent_downloads,
+            all_versions_yanked
         )
     }
 
@@ -750,6 +769,49 @@ mod tests {
     }
 
     #[test]
+    fn crate_enfore_yanked_crate() {
+        let non_none_value = "V".to_string();
+        let mut crt = EncodableCrate {
+            id: "".to_string(),
+            name: "".to_string(),
+            updated_at: NaiveDate::from_ymd(2017, 1, 6).and_hms(14, 23, 11),
+            versions: None,
+            keywords: None,
+            categories: None,
+            badges: None,
+            created_at: NaiveDate::from_ymd(2017, 1, 6).and_hms(14, 23, 12),
+            downloads: 0,
+            recent_downloads: None,
+            all_versions_yanked: false,
+            max_version: "".to_string(),
+            newest_version: "".to_string(),
+            max_stable_version: None,
+            description: Some(non_none_value.clone()),
+            homepage: Some(non_none_value.clone()),
+            documentation: Some(non_none_value.clone()),
+            repository: Some(non_none_value.clone()),
+            links: EncodableCrateLinks {
+                version_downloads: "".to_string(),
+                versions: None,
+                owners: None,
+                owner_team: None,
+                owner_user: None,
+                reverse_dependencies: "".to_string(),
+            },
+            exact_match: false,
+        };
+        assert_eq!(
+            crt.documentation,
+            Some(non_none_value.clone())
+        );
+        crt.enforce_yanked_crate();
+        assert_eq!(
+            crt.documentation,
+            None
+        );
+    }
+
+    #[test]
     fn crate_serializes_to_rfc3399() {
         let crt = EncodableCrate {
             id: "".to_string(),
@@ -762,6 +824,7 @@ mod tests {
             created_at: NaiveDate::from_ymd(2017, 1, 6).and_hms(14, 23, 12),
             downloads: 0,
             recent_downloads: None,
+            all_versions_yanked: false,
             max_version: "".to_string(),
             newest_version: "".to_string(),
             max_stable_version: None,

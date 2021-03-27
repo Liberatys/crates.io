@@ -21,6 +21,9 @@ use crate::models::krate::ALL_COLUMNS;
 /// Handles the `GET /summary` route.
 pub fn summary(req: &mut dyn RequestExt) -> EndpointResult {
     use crate::schema::crates::dsl::*;
+    use crate::schema::*;
+    use diesel::dsl::*;
+    use std::collections::HashMap;
 
     let conn = req.db_read_only()?;
     let num_crates = crates.count().get_result(&*conn)?;
@@ -33,6 +36,22 @@ pub fn summary(req: &mut dyn RequestExt) -> EndpointResult {
 
         let krates = data.into_iter().map(|(c, _)| c).collect::<Vec<_>>();
 
+        let crate_ids: Vec<i32> = krates
+            .iter()
+            .map(|crate_instance| crate_instance.id)
+            .collect();
+
+        let mut crate_yankings: HashMap<i32, bool> = HashMap::new();
+        for crate_id in crate_ids.iter() {
+            let non_yanked_version = select(exists(
+                versions::table
+                    .filter(versions::crate_id.eq(crate_id))
+                    .filter(versions::yanked.eq(false)),
+            ))
+            .get_result::<bool>(&*conn)?;
+            crate_yankings.insert(*crate_id, non_yanked_version);
+        }
+
         let versions: Vec<Version> = krates.versions().load(&*conn)?;
         versions
             .grouped_by(&krates)
@@ -41,12 +60,18 @@ pub fn summary(req: &mut dyn RequestExt) -> EndpointResult {
             .zip(krates)
             .zip(recent_downloads)
             .map(|((top_versions, krate), recent_downloads)| {
+                let all_versions_yanked = match crate_yankings.get(&krate.id) {
+                    Some(non_yanked_version) => !non_yanked_version,
+                    None => false,
+                };
+
                 Ok(EncodableCrate::from_minimal(
                     krate,
                     &top_versions,
                     None,
                     false,
                     recent_downloads,
+                    all_versions_yanked,
                 ))
             })
             .collect()
@@ -119,6 +144,9 @@ pub fn summary(req: &mut dyn RequestExt) -> EndpointResult {
 
 /// Handles the `GET /crates/:crate_id` route.
 pub fn show(req: &mut dyn RequestExt) -> EndpointResult {
+    use crate::schema::*;
+    use diesel::dsl::*;
+
     let name = &req.params()["crate_id"];
     let conn = req.db_read_only()?;
     let krate: Crate = Crate::by_name(name).first(&*conn)?;
@@ -162,6 +190,13 @@ pub fn show(req: &mut dyn RequestExt) -> EndpointResult {
         .load(&*conn)?;
     let top_versions = krate.top_versions(&conn)?;
 
+    let non_yanked_version = select(exists(
+        versions::table
+            .filter(versions::crate_id.eq(krate.id))
+            .filter(versions::yanked.eq(false)),
+    ))
+    .get_result::<bool>(&*conn)?;
+
     #[derive(Serialize)]
     struct R {
         #[serde(rename = "crate")]
@@ -180,6 +215,7 @@ pub fn show(req: &mut dyn RequestExt) -> EndpointResult {
             Some(badges),
             false,
             recent_downloads,
+            !non_yanked_version,
         ),
         versions: versions_publishers_and_audit_actions
             .into_iter()
