@@ -223,7 +223,7 @@ impl EncodableCrate {
         badges: Option<Vec<Badge>>,
         exact_match: bool,
         recent_downloads: Option<i64>,
-        all_versions_yanked: bool
+        all_versions_yanked: bool,
     ) -> Self {
         let Crate {
             name,
@@ -321,7 +321,7 @@ impl EncodableCrate {
             badges,
             exact_match,
             recent_downloads,
-            all_versions_yanked
+            all_versions_yanked,
         )
     }
 
@@ -800,14 +800,10 @@ mod tests {
             },
             exact_match: false,
         };
-        assert_eq!(
-            crt.documentation,
-            Some(non_none_value.clone())
-        );
         crt.enforce_yanked_crate();
         assert_eq!(
-            crt.documentation,
-            None
+            [crt.documentation, crt.homepage, crt.repository],
+            [None, None, None]
         );
     }
 
