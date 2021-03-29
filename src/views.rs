@@ -241,8 +241,7 @@ impl EncodableCrate {
             None => Some(format!("/api/v1/crates/{}/versions", name)),
         };
         let keyword_ids = keywords.map(|kws| kws.iter().map(|kw| kw.keyword.clone()).collect());
-        let category_ids =
-            categories.map(|cats| cats.iter().map(|cat| cat.slug.clone()).collect());
+        let category_ids = categories.map(|cats| cats.iter().map(|cat| cat.slug.clone()).collect());
         let badges = badges.map(|bs| bs.into_iter().map(Badge::into).collect());
         let documentation = Self::remove_blocked_documentation_urls(documentation);
 

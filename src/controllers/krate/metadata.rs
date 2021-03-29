@@ -22,7 +22,6 @@ use crate::models::krate::ALL_COLUMNS;
 pub fn summary(req: &mut dyn RequestExt) -> EndpointResult {
     use crate::schema::crates::dsl::*;
     use crate::schema::*;
-    use diesel::dsl::*;
     use std::collections::HashMap;
 
     let conn = req.db_read_only()?;
@@ -36,27 +35,28 @@ pub fn summary(req: &mut dyn RequestExt) -> EndpointResult {
 
         let krates = data.into_iter().map(|(c, _)| c).collect::<Vec<_>>();
 
+        let versions: Vec<Version> = krates.versions().load(&*conn)?;
+        let all_versions = versions.grouped_by(&krates);
+        let versions = all_versions
+            .clone()
+            .into_iter()
+            .map(TopVersions::from_versions);
+
         let crate_ids: Vec<i32> = krates
             .iter()
             .map(|crate_instance| crate_instance.id)
             .collect();
 
-        let mut crate_yankings: HashMap<i32, bool> = HashMap::new();
-        for crate_id in crate_ids.iter() {
-            let non_yanked_version = select(exists(
-                versions::table
-                    .filter(versions::crate_id.eq(crate_id))
-                    .filter(versions::yanked.eq(false)),
-            ))
-            .get_result::<bool>(&*conn)?;
-            crate_yankings.insert(*crate_id, non_yanked_version);
-        }
+        let crate_yankings: HashMap<i32, bool> = all_versions
+            .iter()
+            .zip(crate_ids)
+            .map(|(versions, crate_id)| {
+                let existing_non_yanked_version = versions.iter().any(|version| !version.yanked);
+                (crate_id, existing_non_yanked_version)
+            })
+            .collect();
 
-        let versions: Vec<Version> = krates.versions().load(&*conn)?;
         versions
-            .grouped_by(&krates)
-            .into_iter()
-            .map(TopVersions::from_versions)
             .zip(krates)
             .zip(recent_downloads)
             .map(|((top_versions, krate), recent_downloads)| {
