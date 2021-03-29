@@ -39,6 +39,7 @@ use crate::models::krate::{canon_crate_name, ALL_COLUMNS};
 /// for them.
 pub fn search(req: &mut dyn RequestExt) -> EndpointResult {
     use diesel::sql_types::{Bool, Text};
+    use std::collections::HashMap;
 
     // Don't require that authentication succeed, because it's only necessary
     // if the "following" param is set.
@@ -206,8 +207,9 @@ pub fn search(req: &mut dyn RequestExt) -> EndpointResult {
     let crates = data.into_iter().map(|(c, _, _)| c).collect::<Vec<_>>();
 
     let versions: Vec<Version> = crates.versions().load(&*conn)?;
-    let versions = versions
-        .grouped_by(&crates)
+    let all_versions = versions.grouped_by(&crates);
+    let versions = all_versions
+        .clone()
         .into_iter()
         .map(TopVersions::from_versions);
 
@@ -219,6 +221,20 @@ pub fn search(req: &mut dyn RequestExt) -> EndpointResult {
         .into_iter()
         .map(|badges| badges.into_iter().map(|cb| cb.badge).collect());
 
+    let crate_ids: Vec<i32> = crates
+        .iter()
+        .map(|crate_instance| crate_instance.id)
+        .collect();
+
+    let crate_yankings: HashMap<i32, bool> = all_versions
+        .iter()
+        .zip(crate_ids)
+        .map(|(versions, id)| {
+            let existing_non_yanked_version = versions.iter().any(|version| !version.yanked);
+            (id, existing_non_yanked_version)
+        })
+        .collect();
+
     let crates = versions
         .zip(crates)
         .zip(perfect_matches)
@@ -226,12 +242,17 @@ pub fn search(req: &mut dyn RequestExt) -> EndpointResult {
         .zip(badges)
         .map(
             |((((max_version, krate), perfect_match), recent_downloads), badges)| {
+                let all_versions_yanked = match crate_yankings.get(&krate.id) {
+                    Some(non_yanked_version_present) => !non_yanked_version_present,
+                    None => false,
+                };
                 EncodableCrate::from_minimal(
                     krate,
                     &max_version,
                     Some(badges),
                     perfect_match,
                     Some(recent_downloads),
+                    all_versions_yanked,
                 )
             },
         )
